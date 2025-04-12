@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+passlib[bcrypt]
+python-jose[cryptography]
+PyJWT
+python-dotenv
+email-validator
+alembic # If using Alembic for migrations
+databases[postgresql] # Optional: for async DB access
+# Add any AI libraries (e.g., openai, spacy, transformers) here later
+# Add task queue libraries (e.g., celery, redis) when implementing reminders
+pydantic-settings

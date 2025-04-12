@@ -1,0 +1,50 @@
+# Test cases for CRUD operations
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from backend.db.session import get_db
+from backend.crud.crud_user import CRUDUser
+from backend.models import User  # Assuming User model is defined in models.py
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"  # Use a test database
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+@pytest.fixture(scope="module")
+def db():
+    # Create the database tables
+    User.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    yield db
+    db.close()
+    # Drop the database tables after tests
+    User.metadata.drop_all(bind=engine)
+
+def test_create_user(db):
+    crud_user = CRUDUser()
+    user_data = {"username": "testuser", "email": "test@example.com", "password": "password"}
+    user = crud_user.create(db=db, obj_in=user_data)
+    assert user.username == user_data["username"]
+    assert user.email == user_data["email"]
+
+def test_read_user(db):
+    crud_user = CRUDUser()
+    user = crud_user.get(db=db, id=1)  # Assuming the user created in the previous test has ID 1
+    assert user is not None
+    assert user.username == "testuser"
+
+def test_update_user(db):
+    crud_user = CRUDUser()
+    user_data = {"username": "updateduser"}
+    updated_user = crud_user.update(db=db, db_obj=db.query(User).filter(User.id == 1).first(), obj_in=user_data)
+    assert updated_user.username == "updateduser"
+
+def test_delete_user(db):
+    crud_user = CRUDUser()
+    user = crud_user.remove(db=db, id=1)  # Assuming the user created in the first test has ID 1
+    assert user is not None
+    assert crud_user.get(db=db, id=1) is None  # User should be deleted
+
+# Additional tests for CRUD operations can be added here.
