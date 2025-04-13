@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Mic, Settings, User, Bot, Clock, History, Loader2,
   NotebookText, Wallet, TrendingUp, HeartPulse, ChevronDown,
-  Menu, Sun, Moon, LogIn, LogOut, UserPlus, RefreshCw // Added RefreshCw
+  Menu, Sun, Moon, LogIn, LogOut, UserPlus, RefreshCw, X // Added X
 } from 'lucide-react';
 
 // --- API Client Helper ---
@@ -169,6 +169,121 @@ const RegisterForm = ({ onRegisterSuccess, authError, setAuthError, switchToLogi
 };
 // --- End Registration Form Component ---
 
+// --- New Profile Modal Component ---
+const ProfileModal = ({ isOpen, onClose, currentUser, refreshUser }) => {
+  const [editableFullName, setEditableFullName] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+  const [updateSuccess, setUpdateSuccess] = useState('');
+  const BACKEND_URL = 'http://localhost:8000/api/v1';
+
+  // Update editable name when currentUser data changes (e.g., on modal open or refresh)
+  useEffect(() => {
+      if (currentUser) {
+          setEditableFullName(currentUser.full_name || '');
+      }
+  }, [currentUser]);
+
+  const handleProfileUpdate = async (e) => {
+      e.preventDefault();
+      setIsUpdating(true);
+      setUpdateError('');
+      setUpdateSuccess('');
+
+      try {
+          const updatedData = { full_name: editableFullName };
+          // Use apiClient to make the authenticated PUT request
+          const updatedUser = await apiClient.put(`${BACKEND_URL}/users/me`, updatedData);
+          setUpdateSuccess("Profile updated successfully!");
+          refreshUser(); // Refresh user data in the App component
+          // Close modal after a short delay
+          setTimeout(() => {
+               onClose();
+               setUpdateSuccess(''); // Clear success message
+          }, 1500);
+
+      } catch (error) {
+          console.error("Profile update failed:", error);
+          setUpdateError(error.message || "Failed to update profile.");
+      } finally {
+          setIsUpdating(false);
+      }
+  };
+
+  // Close modal if isOpen becomes false
+  if (!isOpen) {
+      return null;
+  }
+
+  return (
+      // Modal backdrop
+      <div className="fixed inset-0 bg-black bg-opacity-60 z-40 flex items-center justify-center p-4">
+          {/* Modal content */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6 relative">
+              {/* Close button */}
+              <button
+                  onClick={onClose}
+                  className="absolute top-3 right-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  aria-label="Close profile modal"
+              >
+                  <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Your Profile</h2>
+
+              {/* Display Update Status */}
+               {updateError && (<p className="mb-3 text-sm text-red-500 dark:text-red-400">{updateError}</p>)}
+               {updateSuccess && (<p className="mb-3 text-sm text-green-500 dark:text-green-400">{updateSuccess}</p>)}
+
+              <form onSubmit={handleProfileUpdate}>
+                  {/* Email (Read-only) */}
+                  <div className="mb-4">
+                      <label className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400" htmlFor="prof-email">Email</label>
+                      <input
+                          type="email" id="prof-email"
+                          value={currentUser?.email || 'Loading...'}
+                          readOnly
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                      />
+                  </div>
+
+                  {/* Full Name (Editable) */}
+                  <div className="mb-6">
+                      <label className="block text-sm font-medium mb-1 text-gray-600 dark:text-gray-400" htmlFor="prof-fullname">Full Name</label>
+                      <input
+                          type="text" id="prof-fullname"
+                          value={editableFullName}
+                          onChange={(e) => setEditableFullName(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                          placeholder="Enter your full name"
+                      />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-end space-x-3">
+                      <button
+                          type="button"
+                          onClick={onClose}
+                          className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500"
+                      >
+                          Cancel
+                      </button>
+                      <button
+                          type="submit"
+                          disabled={isUpdating}
+                          className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 flex items-center justify-center"
+                      >
+                           {isUpdating ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
+                           {isUpdating ? 'Saving...' : 'Save Changes'}
+                      </button>
+                  </div>
+              </form>
+          </div>
+      </div>
+  );
+};
+// --- End Profile Modal Component ---
+
 
 // --- Main App Component ---
 function App() {
@@ -207,6 +322,10 @@ function App() {
   const [isLoadingMedicalLogs, setIsLoadingMedicalLogs] = useState(false);
   const [medicalLogsError, setMedicalLogsError] = useState('');
 
+  const [currentUser, setCurrentUser] = useState(null); // Store user details {id, email, full_name, is_active}
+  const [isLoadingUser, setIsLoadingUser] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
 
   const logEndRef = useRef(null);
   const BACKEND_URL = 'http://localhost:8000/api/v1';
@@ -226,6 +345,8 @@ function App() {
       setSpendingLogs([]); setSpendingError(''); setSpendingTotal(null);
       setInvestmentNotes([]); setInvestmentNotesError(''); // Reset investments
       setMedicalLogs([]); setMedicalLogsError(''); // Reset medical
+      setCurrentUser(null); // Clear current user data
+      setIsLoadingUser(false); // Reset loading state
       console.log("User logged out");
   }, []); // Added investment/medical reset
   const handleRegisterSuccess = () => { console.log("Registration successful! Please login."); setAuthError(''); setAuthMode('login'); };
@@ -311,6 +432,27 @@ const handleFetchImportantNotes = async () => {
         if (error.message.includes('401')) handleLogout();
     }
 };
+
+ // --- Fetch Current User Function ---
+ const fetchCurrentUser = useCallback(async () => {
+  if (!isAuthenticated) return;
+  console.log("Fetching current user data...");
+  setIsLoadingUser(true); // Optional: add loading state for user fetch
+  try {
+      const userData = await apiClient.get(`${BACKEND_URL}/users/me`);
+      setCurrentUser(userData);
+      console.log("Current user data:", userData);
+  } catch (error) {
+      console.error("Failed to fetch current user:", error);
+      // If fetching user fails (e.g., invalid token), log out
+      if (error.message.includes('401') || error.message.includes('validate credentials')) {
+          handleLogout();
+      }
+  } finally {
+      setIsLoadingUser(false);
+  }
+}, [isAuthenticated, handleLogout]); // Re-fetch if auth state changes
+
   // --- Fetch Data Functions ---
   const fetchGlobalNotes = useCallback(async () => {
     if (!isAuthenticated) return; // Don't fetch if not logged in
@@ -544,7 +686,18 @@ const handleFetchImportantNotes = async () => {
             <div className="mt-auto border-t border-gray-700 pt-3 space-y-1">
                <button onClick={toggleTheme} className="flex items-center w-full p-2 rounded hover:bg-gray-700 text-left transition-colors duration-200"> {isDarkMode ? <Sun size={18} className="mr-3" /> : <Moon size={18} className="mr-3" />} {isDarkMode ? "Light Mode" : "Dark Mode"} </button>
                <button type="button" onClick={() => console.log("Settings Clicked (TODO)")} className="flex items-center w-full p-2 rounded hover:bg-gray-700 text-left transition-colors duration-200"> <Settings size={18} className="mr-3" /> Settings </button>
-               <button type="button" onClick={() => console.log("Profile Clicked (TODO)")} className="flex items-center w-full p-2 rounded hover:bg-gray-700 text-left transition-colors duration-200"> <User size={18} className="mr-3" /> Profile </button>
+               
+               {/* --- Updated Profile Button --- */}
+               <button
+                    type="button"
+                    onClick={() => setIsProfileModalOpen(true)} // Open the modal
+                    className="flex items-center w-full p-2 rounded hover:bg-gray-700 text-left transition-colors duration-200"
+                >
+                    <User size={18} className="mr-3" /> Profile
+                    {/* Optionally display name: {currentUser?.full_name || currentUser?.email} */}
+               </button>
+               {/* --- End Updated Profile Button --- */}
+
                <button onClick={handleLogout} className="flex items-center w-full p-2 rounded hover:bg-red-800 hover:bg-opacity-80 text-left transition-colors duration-200 text-red-300"> <LogOut size={18} className="mr-3" /> Logout </button>
             </div>
         </aside>
@@ -559,6 +712,13 @@ const handleFetchImportantNotes = async () => {
             {/* Input Area */}
             <div className="bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4 flex-shrink-0"> <div className="flex items-center bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm px-2 py-1 focus-within:ring-2 focus-within:ring-blue-500"> <textarea rows="1" value={inputText} onChange={(e) => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight}px`; }} onKeyPress={handleKeyPress} placeholder="Type your command or note... (Shift+Enter for newline)" className="flex-grow p-2 border-none focus:ring-0 resize-none overflow-y-auto text-sm bg-transparent dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500" style={{ maxHeight: '120px' }} disabled={isLoading || isListening} /> <button onClick={handleVoiceInput} className={`ml-2 p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 transition-colors duration-200 ${isListening ? 'text-red-500 animate-pulse' : ''}`} disabled={isLoading} title="Voice Input (Placeholder)"> <Mic size={20} /> </button> <button onClick={() => handleSend()} className="ml-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200" disabled={isLoading || !inputText.trim()} aria-label="Send message"> <Send size={20} /> </button> </div> </div>
         </main>
+        {/* Render Profile Modal Conditionally */}
+        <ProfileModal
+            isOpen={isProfileModalOpen}
+            onClose={() => setIsProfileModalOpen(false)}
+            currentUser={currentUser}
+            refreshUser={fetchCurrentUser} // Pass function to refresh user data after update
+        />
       </div>
     </div>
   );
