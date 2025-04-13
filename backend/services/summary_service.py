@@ -1,40 +1,60 @@
 # backend/services/summary_service.py
-# (No significant changes from previous version - still placeholder)
 import logging
 from typing import List, Dict, Any
 
+from backend.services.llm import get_llm_service # Import the factory
+
 logger = logging.getLogger(__name__)
 
-def generate_summary(data_to_summarize: List[Dict[str, Any]], user_preferences: Dict = None) -> str:
+async def generate_daily_summary(data_to_summarize: List[Dict[str, Any]], user_preferences: Dict = None) -> str:
     """
-    Placeholder Summarization - Replace with real LLM API call.
+    Generates a daily summary using the configured LLM provider.
     """
     item_count = len(data_to_summarize)
-    logger.info(f"Summary Service: Generating summary for {item_count} items.")
+    logger.info(f"Summary Service: Generating daily summary for {item_count} items.")
 
     if not data_to_summarize:
         return "Nothing significant found to summarize for the specified period."
 
-    # --- Placeholder Summary Logic ---
-    summary_lines = [f"Found {item_count} relevant log(s):"]
-    for i, item in enumerate(data_to_summarize[:3]): # Show first 3 items max
+    # --- Prepare input for LLM ---
+    # Format the logs into a string or structured list suitable for the LLM prompt
+    formatted_logs = []
+    for item in data_to_summarize:
         item_type = item.get("type", "log")
         content = item.get("content", "N/A")
         timestamp = item.get("timestamp")
-        time_str = timestamp.strftime('%H:%M') if timestamp else ''
-        summary_lines.append(f"- {time_str} ({item_type}) {str(content)[:80]}{'...' if len(str(content)) > 80 else ''}")
-    if item_count > 3:
-        summary_lines.append(f"- ... and {item_count - 3} more item(s).")
+        time_str = timestamp.strftime('%H:%M') if timestamp and hasattr(timestamp, 'strftime') else ''
+        formatted_logs.append(f"- {time_str} ({item_type}): {content}")
 
-    # TODO: Replace above with actual call to an LLM API
+    log_text = "\n".join(formatted_logs)
+    prompt = f"Provide a brief summary of the key events and activities from the following daily logs:\n\n{log_text}\n\nSummary:"
 
-    return "\n".join(summary_lines) + "\n\n[AI Summary Placeholder - Full implementation needed]"
+    # --- Get LLM Service and Generate ---
+    try:
+        llm_service = get_llm_service() # Get default configured LLM service
+        # Note: Ollama service methods are async, others might be sync.
+        # Need to handle this - easiest is to make all service methods async
+        # or use something like anyio.to_thread.run_sync for sync methods if called from async route.
+        # Assuming generate_summary in base class can be async or handled appropriately.
+        # For simplicity here, let's assume the base method handles sync/async or we use await
+        if llm_service.provider == "ollama":
+             # Ollama client uses async httpx
+             summary = await llm_service.generate_summary(documents=[log_text]) # Pass as single doc for now
+        else:
+             # OpenAI/Gemini clients might be sync - wrap if needed in async context
+             # This might require restructuring or using run_in_threadpool
+             # For demonstration, calling directly (might block if sync in async route)
+             summary = llm_service.generate_summary(documents=[log_text])
 
-    # --- New Function for Note Summarization ---
-def generate_note_summary(notes_content: List[str], criteria_tags: List[str] = None, criteria_keywords: List[str] = None) -> str:
+        return summary
+    except Exception as e:
+        logger.error(f"Error generating daily summary via LLM: {e}", exc_info=True)
+        return "[Error: Failed to generate summary using AI service]"
+
+
+async def generate_note_summary(notes_content: List[str], criteria_tags: List[str] = None, criteria_keywords: List[str] = None) -> str:
     """
-    Placeholder for summarizing a list of note contents based on criteria.
-    Replace with real LLM API call.
+    Generates a summary of notes using the configured LLM provider.
     """
     note_count = len(notes_content)
     logger.info(f"Summary Service: Generating note summary for {note_count} notes.")
@@ -42,24 +62,28 @@ def generate_note_summary(notes_content: List[str], criteria_tags: List[str] = N
     if not notes_content:
         return "No notes found matching the criteria to summarize."
 
-    # --- Placeholder Summary Logic ---
+    # --- Prepare input for LLM ---
     criteria_desc = []
-    if criteria_tags:
-        criteria_desc.append(f"tags: {', '.join(criteria_tags)}")
-    if criteria_keywords:
-        criteria_desc.append(f"keywords: {', '.join(criteria_keywords)}")
+    if criteria_tags: criteria_desc.append(f"tags: {', '.join(criteria_tags)}")
+    if criteria_keywords: criteria_desc.append(f"keywords: {', '.join(criteria_keywords)}")
     criteria_str = f" based on {', '.join(criteria_desc)}" if criteria_desc else ""
 
-    summary_lines = [f"Summary of {note_count} note(s){criteria_str}:"]
-    # Combine first few characters of each note for a very basic placeholder summary
-    combined_content = " ".join([content[:100] + "..." for content in notes_content[:2]]) # Max 2 notes preview
-    summary_lines.append(f"- {combined_content[:200]}{'...' if len(combined_content) > 200 else ''}")
-    if note_count > 2:
-        summary_lines.append(f"- ... plus content from {note_count - 2} other note(s).")
+    # Combine notes - handle potential length limits for LLM context window
+    full_text = "\n\n---\n\n".join(notes_content)
+    # TODO: Add truncation or chunking if full_text is too long
 
-    # TODO: Replace above with actual call to an LLM API
-    # Pass the notes_content list (or concatenated string) to the LLM with a prompt like:
-    # f"Summarize the key points from the following {note_count} notes{criteria_str}:\n\n{' '.join(notes_content)}"
+    prompt = f"Summarize the key points from the following {note_count} note(s){criteria_str}:\n\n{full_text}\n\nSummary:"
 
-    return "\n".join(summary_lines) + "\n\n[AI Note Summary Placeholder - Full implementation needed]"
-# --- End New Function ---
+    # --- Get LLM Service and Generate ---
+    try:
+        llm_service = get_llm_service()
+        # Handle async/sync call similar to daily summary
+        if llm_service.provider == "ollama":
+             summary = await llm_service.generate_summary(documents=[full_text]) # Pass combined text
+        else:
+             summary = llm_service.generate_summary(documents=[full_text])
+
+        return summary
+    except Exception as e:
+        logger.error(f"Error generating note summary via LLM: {e}", exc_info=True)
+        return "[Error: Failed to generate note summary using AI service]"
