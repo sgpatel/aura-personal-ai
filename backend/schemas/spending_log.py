@@ -5,29 +5,28 @@ import datetime
 
 class SpendingLogBase(BaseModel):
     description: str
-    amount: float = Field(..., gt=0) # Ensure amount is positive
+    amount: float = Field(..., gt=0)
     category: Optional[str] = None
-    date: Optional[datetime.date] = None # Optional on create, defaults to today
+    date: Optional[datetime.date] = None
 
 class SpendingLogCreate(SpendingLogBase):
     pass
+
+class SpendingLogUpdate(BaseModel):
+    description: Optional[str] = None
+    amount: Optional[float] = Field(None, gt=0)
+    category: Optional[str] = None
+    date: Optional[datetime.date] = None
 
 class SpendingLog(SpendingLogBase):
     id: int
     user_id: int
     timestamp: datetime.datetime
-    date: datetime.date # Make non-optional in response
+    date: datetime.date
 
     class Config:
-        orm_mode = True
+        from_attributes = True # Pydantic V2 update
 
 class SpendingLogsOutput(BaseModel):
     spending_logs: List[SpendingLog]
-    total_amount: Optional[float] = None # Optional field for aggregations
-
-class SpendingLogUpdate(BaseModel):
-    description: Optional[str] = None
-    amount: Optional[float] = Field(None, gt=0)  # Ensure amount is positive if provided
-    category: Optional[str] = None
-    date: Optional[datetime.date] = None
-
+    total_amount: Optional[float] = None

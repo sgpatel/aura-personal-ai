@@ -11,18 +11,18 @@ class InvestmentNoteBase(BaseModel):
 class InvestmentNoteCreate(InvestmentNoteBase):
     pass
 
+class InvestmentNoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[List[str]] = None
+
 class InvestmentNote(InvestmentNoteBase):
     id: int
     user_id: int
     timestamp: datetime.datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True # Pydantic V2 update
 
 class InvestmentNotesOutput(BaseModel):
     investment_notes: List[InvestmentNote]
-
-class InvestmentNoteUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    tags: Optional[List[str]] = None

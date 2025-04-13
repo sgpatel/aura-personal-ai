@@ -2,23 +2,22 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
-# Shared properties
 class UserBase(BaseModel):
     email: EmailStr
     full_name: Optional[str] = None
 
-# Properties to receive via API on creation
 class UserCreate(UserBase):
     password: str
 
-# Properties to return via API
+class UserUpdate(UserBase):
+    password: Optional[str] = None
+    full_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
 class User(UserBase):
     id: int
     is_active: bool
 
     class Config:
-        orm_mode = True # Enable mapping from DB models
-
-# Properties to receive via API on update
-class UserUpdate(UserBase):
-    password: Optional[str] = None
+        # Pydantic V2 uses from_attributes instead of orm_mode
+        from_attributes = True
