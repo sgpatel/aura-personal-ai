@@ -44,17 +44,21 @@ class Settings(BaseSettings):
 
     # OpenAI Settings
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    OPENAI_MODEL_NAME: str = Field(default="gpt-4o", env="OPENAI_MODEL_NAME") # Added specific model config
 
     # Google Gemini Settings
     GOOGLE_API_KEY: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
+    # GOOGLE_MODEL_NAME: str = Field(default="gemini-1.5-flash", env="GOOGLE_MODEL_NAME") # Optional
 
     # Ollama Settings
     OLLAMA_BASE_URL: Optional[HttpUrl] = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
     OLLAMA_DEFAULT_MODEL: str = Field(default="llama3", env="OLLAMA_DEFAULT_MODEL")
 
+
     # --- Add Validations for LLM Keys based on Provider ---
     # Pydantic V2 validators are slightly different
-    @validator("OPENAI_API_KEY", always=True, pre=False) # Check after other fields are processed
+    # --- Validations ---
+    @validator("OPENAI_API_KEY", always=True, pre=False)
     def check_openai_key(cls, v, values):
         if values.get("DEFAULT_LLM_PROVIDER") == "openai" and not v:
             raise ValueError("OPENAI_API_KEY must be set if DEFAULT_LLM_PROVIDER is 'openai'")
@@ -67,9 +71,7 @@ class Settings(BaseSettings):
         return v
 
     class Config:
-        # BaseSettings automatically looks for .env file, no need for env_file = ".env"
         case_sensitive = True
-
 
 settings = Settings()
 
@@ -100,6 +102,8 @@ if settings.DATABASE_URL:
 else: logger.warning("DATABASE_URL is not set, database connection will not be established.")
 if settings.SECRET_KEY == "DEFAULT_SECRET_CHANGE_ME_IN_ENV": logger.warning("Security Warning: Using default SECRET_KEY.")
 logger.info(f"Default LLM Provider set to: {settings.DEFAULT_LLM_PROVIDER}")
+if settings.DEFAULT_LLM_PROVIDER == "openai":
+    logger.info(f"Using OpenAI Model: {settings.OPENAI_MODEL_NAME}") # Log the model being used
 if settings.DEFAULT_LLM_PROVIDER == "ollama":
     logger.info(f"Ollama Base URL: {settings.OLLAMA_BASE_URL}")
     logger.info(f"Ollama Default Model: {settings.OLLAMA_DEFAULT_MODEL}")

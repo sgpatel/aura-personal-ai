@@ -19,8 +19,9 @@ const apiClient = {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
+    let response;
     try {
-      const response = await fetch(url, { ...options, headers });
+      response = await fetch(url, { ...options, headers });
       if (!response.ok) {
         let errorData;
         try { errorData = await response.json(); } catch (e) { errorData = await response.text(); }
@@ -32,7 +33,7 @@ const apiClient = {
     } catch (error) {
       console.error("API Client Error:", error);
       // Add specific handling for 401 Unauthorized if needed globally
-      // if (error.message.includes('401')) { /* trigger logout? */ }
+      console.error("API Client Error Details:", { status: response?.status, message: error.message, url: url, options: options });
       throw error; // Re-throw for component-level handling
     }
   },

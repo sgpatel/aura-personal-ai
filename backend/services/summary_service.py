@@ -31,21 +31,10 @@ async def generate_daily_summary(data_to_summarize: List[Dict[str, Any]], user_p
 
     # --- Get LLM Service and Generate ---
     try:
-        llm_service = get_llm_service() # Get default configured LLM service
-        # Note: Ollama service methods are async, others might be sync.
-        # Need to handle this - easiest is to make all service methods async
-        # or use something like anyio.to_thread.run_sync for sync methods if called from async route.
-        # Assuming generate_summary in base class can be async or handled appropriately.
-        # For simplicity here, let's assume the base method handles sync/async or we use await
-        if llm_service.provider == "ollama":
-             # Ollama client uses async httpx
-             summary = await llm_service.generate_summary(documents=[log_text]) # Pass as single doc for now
-        else:
-             # OpenAI/Gemini clients might be sync - wrap if needed in async context
-             # This might require restructuring or using run_in_threadpool
-             # For demonstration, calling directly (might block if sync in async route)
-             summary = llm_service.generate_summary(documents=[log_text])
-
+        llm_service = get_llm_service()
+        # --- Use await for ALL providers since base methods are async ---
+        summary = await llm_service.generate_summary(documents=[log_text])
+        # --- End Fix ---
         return summary
     except Exception as e:
         logger.error(f"Error generating daily summary via LLM: {e}", exc_info=True)
@@ -62,27 +51,18 @@ async def generate_note_summary(notes_content: List[str], criteria_tags: List[st
     if not notes_content:
         return "No notes found matching the criteria to summarize."
 
-    # --- Prepare input for LLM ---
-    criteria_desc = []
+    criteria_desc = [];
     if criteria_tags: criteria_desc.append(f"tags: {', '.join(criteria_tags)}")
     if criteria_keywords: criteria_desc.append(f"keywords: {', '.join(criteria_keywords)}")
     criteria_str = f" based on {', '.join(criteria_desc)}" if criteria_desc else ""
-
-    # Combine notes - handle potential length limits for LLM context window
-    full_text = "\n\n---\n\n".join(notes_content)
-    # TODO: Add truncation or chunking if full_text is too long
-
+    full_text = "\n\n---\n\n".join(notes_content) # TODO: Handle length limits
     prompt = f"Summarize the key points from the following {note_count} note(s){criteria_str}:\n\n{full_text}\n\nSummary:"
 
-    # --- Get LLM Service and Generate ---
     try:
         llm_service = get_llm_service()
-        # Handle async/sync call similar to daily summary
-        if llm_service.provider == "ollama":
-             summary = await llm_service.generate_summary(documents=[full_text]) # Pass combined text
-        else:
-             summary = llm_service.generate_summary(documents=[full_text])
-
+        # --- Use await for ALL providers since base methods are async ---
+        summary = await llm_service.generate_summary(documents=[full_text])
+        # --- End Fix ---
         return summary
     except Exception as e:
         logger.error(f"Error generating note summary via LLM: {e}", exc_info=True)
