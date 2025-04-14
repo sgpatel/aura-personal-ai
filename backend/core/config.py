@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     # GOOGLE_MODEL_NAME: str = Field(default="gemini-1.5-flash", env="GOOGLE_MODEL_NAME") # Optional
 
     # Ollama Settings
-    OLLAMA_BASE_URL: Optional[HttpUrl] = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
-    OLLAMA_DEFAULT_MODEL: str = Field(default="llama3", env="OLLAMA_DEFAULT_MODEL")
+    #OLLAMA_BASE_URL: Optional[HttpUrl] = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
+    #OLLAMA_DEFAULT_MODEL: str = Field(default="llama3", env="OLLAMA_DEFAULT_MODEL")
 
 
     # --- Add Validations for LLM Keys based on Provider ---
@@ -102,8 +102,6 @@ if settings.DATABASE_URL:
 else: logger.warning("DATABASE_URL is not set, database connection will not be established.")
 if settings.SECRET_KEY == "DEFAULT_SECRET_CHANGE_ME_IN_ENV": logger.warning("Security Warning: Using default SECRET_KEY.")
 logger.info(f"Default LLM Provider set to: {settings.DEFAULT_LLM_PROVIDER}")
-if settings.DEFAULT_LLM_PROVIDER == "openai":
-    logger.info(f"Using OpenAI Model: {settings.OPENAI_MODEL_NAME}") # Log the model being used
-if settings.DEFAULT_LLM_PROVIDER == "ollama":
-    logger.info(f"Ollama Base URL: {settings.OLLAMA_BASE_URL}")
-    logger.info(f"Ollama Default Model: {settings.OLLAMA_DEFAULT_MODEL}")
+# if settings.DEFAULT_LLM_PROVIDER == "ollama":
+#     logger.info(f"Ollama Base URL: {settings.OLLAMA_BASE_URL}")
+#     logger.info(f"Ollama Default Model: {settings.OLLAMA_DEFAULT_MODEL}")

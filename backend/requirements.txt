@@ -18,4 +18,8 @@ openai >= 1.0 # For OpenAI API
 google-generativeai # For Google Gemini API
 httpx # For making requests to Ollama API
 
+# Vector DB & Embeddings
+pgvector # Added pgvector client
+sentence-transformers # Added for generating embeddings
+
 # Add task queue libraries (e.g., celery, redis) when implementing reminders
