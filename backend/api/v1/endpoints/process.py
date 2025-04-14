@@ -84,6 +84,33 @@ async def process_input_endpoint(
                 if not notes_to_summarize: reply_text = "No notes found matching criteria."
                 else: notes_content = [note.content for note in notes_to_summarize]; summary = await summary_service.generate_note_summary(notes_content=notes_content, criteria_tags=tags, criteria_keywords=keywords); reply_text = summary
 
+# --- New Handler for get_reminders ---
+        elif intent == "get_reminders":
+            logger.info(f"Handling get_reminders intent for user {user_id}")
+            try:
+                # Fetch upcoming reminders using CRUD (adjust parameters/logic as needed)
+                # Example: Get active reminders due in the next 7 days
+                upcoming_reminders = crud.reminder.get_upcoming_reminders(db=db, user_id=user_id, within_minutes=60*24*7)
+                # Alternatively, get all active reminders:
+                # upcoming_reminders = crud.reminder.get_multi_by_owner(db=db, user_id=user_id, only_active=True, limit=20)
+
+                if not upcoming_reminders:
+                    reply_text = "You have no upcoming reminders found."
+                else:
+                    reply_text = "Okay, here are your upcoming reminders:\n"
+                    for rem in upcoming_reminders:
+                        try:
+                            # Format time in user's local timezone if possible, else UTC
+                            rem_time_local = rem.remind_at.astimezone()
+                            time_str = rem_time_local.strftime('%a, %b %d %I:%M %p')
+                        except Exception: # Fallback if timezone conversion fails
+                            time_str = rem.remind_at.strftime('%Y-%m-%d %H:%M UTC')
+                        reply_text += f"- {rem.content} (at {time_str})\n"
+            except Exception as e:
+                logger.error(f"Error fetching reminders for user {user_id}: {e}", exc_info=True)
+                reply_text = "Sorry, I couldn't fetch your reminders right now."
+        # --- End New Handler ---
+        
         # --- Updated ask_question Intent Handler ---
         elif intent == "ask_question":
             question = entities.get('question_text', text_input)

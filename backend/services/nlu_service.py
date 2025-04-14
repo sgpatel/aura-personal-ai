@@ -1,6 +1,5 @@
 # backend/services/nlu_service.py
-# Placeholder - Replace with real NLU (spaCy, Rasa, or LLM-based intent/entity extraction)
-# Added improved spending pattern matching
+# Placeholder - Replace with real NLU
 import logging
 from typing import Dict, Any
 import re
@@ -11,16 +10,20 @@ logger.setLevel(logging.DEBUG)
 
 QUESTION_WORDS = ("who", "what", "where", "when", "why", "how", "is", "are", "do", "does", "can", "could", "tell me")
 MEETING_WORDS = ("meeting", "appointment", "schedule", "meet with", "appt")
+# --- New Keywords for Getting Reminders ---
+REMINDER_QUERY_WORDS = (
+    "upcoming meetings", "my reminders", "scheduled meetings",
+    "check reminders", "what reminders", "what meetings",
+    "list reminders", "show reminders", "reminders list"
+)
+# --- End New Keywords ---
 TIME_PATTERN = re.compile(r'\b(\d{1,2}(:\d{2})?)\s*(am|pm)?\b', re.IGNORECASE)
-# --- Improved Spending Pattern ---
-# Looks for "spend/spent [currency symbol optional] [amount] ... [for/on item]"
-SPENDING_PATTERN = re.compile(r'\b(?:spend|spent|buy|bought)\s+([$£€₹]?\s*\d+(?:[.,]\d{1,2})?)\b(?:.*?(?:for|on)\s+(.+))?', re.IGNORECASE)
-# Group 1: Amount (e.g., "$10", "15.50")
-# Group 2: Description (optional, e.g., "food today")
+SPENDING_PATTERN = re.compile(r'\b(?:spend|spent)\s+([$£€₹]?\s*\d+(?:[.,]\d{1,2})?)\b(?:.*?(?:for|on)\s+(.+))?', re.IGNORECASE)
+
 
 def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
     """
-    Placeholder NLU - Includes improved spending detection.
+    Placeholder NLU - Includes get_reminders intent.
     Replace with real NLU model/API.
     """
     logger.debug(f"NLU Service Processing input: '{text}'")
@@ -28,35 +31,24 @@ def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
     entities = {}
     text_lower = text.lower()
 
-    # --- Intent Checks (Order matters) ---
+    # --- Intent Checks (Order matters: More specific first) ---
 
-    # 1. Specific Commands/Logs first
-    # --- Updated Spending Check ---
+    # 1. Specific Commands/Logs
     spending_match = SPENDING_PATTERN.search(text)
     logger.debug(f"Checking log_spending (pattern): match={bool(spending_match)}")
     if spending_match:
-        intent = "log_spending"
-        try:
-            # Extract amount, removing currency symbols/spaces
-            amount_str = re.sub(r'[^\d.,]', '', spending_match.group(1)).replace(',', '.')
-            entities['amount'] = float(amount_str)
-        except (ValueError, TypeError):
-            logger.warning(f"Could not parse amount from spending pattern: {spending_match.group(1)}")
-            entities['amount'] = None # Flag that amount parsing failed
-        # Extract description if present
-        entities['description'] = spending_match.group(2).strip() if spending_match.group(2) else "Unspecified Expense"
+        intent = "log_spending"; entities['amount'] = None; entities['description'] = "Unspecified Expense"
+        try: amount_str = re.sub(r'[^\d.,]', '', spending_match.group(1)).replace(',', '.'); entities['amount'] = float(amount_str)
+        except (ValueError, TypeError): logger.warning(f"Could not parse amount: {spending_match.group(1)}")
+        if spending_match.group(2): entities['description'] = spending_match.group(2).strip()
         logger.debug(f"--> Matched intent: {intent}")
-    # Fallback keyword check if pattern fails but keywords exist
     elif intent == "unknown" and ("log spending" in text_lower or "expense" in text_lower):
-         intent = "log_spending"
-         match_amount = re.search(r'\$?(\d+(\.\d{1,2})?)', text) # Keep original regex as fallback
+         intent = "log_spending"; match_amount = re.search(r'\$?(\d+(\.\d{1,2})?)', text)
          if match_amount: entities['amount'] = float(match_amount.group(1))
          match_desc = re.search(r'(?:for|of) (.*)', text, re.IGNORECASE)
          if match_desc: entities['description'] = match_desc.group(1).strip()
          else: entities['description'] = "Unspecified Expense"
          logger.debug(f"--> Matched intent (keyword fallback): {intent}")
-    # --- End Updated Spending Check ---
-
 
     logger.debug(f"Checking log_investment: 'log investment' in text={ 'log investment' in text_lower }")
     if intent == "unknown" and "log investment" in text_lower:
@@ -71,7 +63,7 @@ def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
         else: entities['log_type'] = "general"
         logger.debug(f"--> Matched intent: {intent}")
 
-    # 2. Actions like scheduling/reminders
+    # 2. Actions (Scheduling/Reminders)
     debug_has_meet_word = any(word in text_lower for word in MEETING_WORDS)
     debug_time_match = TIME_PATTERN.search(text); debug_has_time = bool(debug_time_match)
     logger.debug(f"Checking schedule_meeting: has_meet_word={debug_has_meet_word}, has_time={debug_has_time}")
@@ -91,7 +83,14 @@ def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
         intent = "save_note"; entities['content'] = text.split(":", 1)[-1].strip() if ":" in text else text.replace("save note", "").strip(); entities['is_global'] = True
         logger.debug(f"--> Matched intent: {intent}")
 
-    # 4. Summarization Requests
+    # 4. Querying Information (BEFORE general question check)
+    debug_get_reminders = any(phrase in text_lower for phrase in REMINDER_QUERY_WORDS)
+    logger.debug(f"Checking get_reminders: has_keywords={debug_get_reminders}")
+    if intent == "unknown" and debug_get_reminders:
+        intent = "get_reminders"
+        entities['filter'] = 'upcoming' # Default filter, could parse "today", "next week" etc.
+        logger.debug(f"--> Matched intent: {intent}")
+
     debug_note_summary_keywords = "summarize notes tagged" in text_lower or "summarize notes about" in text_lower
     logger.debug(f"Checking get_note_summary: has_keywords={debug_note_summary_keywords}")
     if intent == "unknown" and debug_note_summary_keywords:
@@ -116,7 +115,7 @@ def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
         except ValueError: logger.warning(f"Could not parse date: {text}"); entities['date'] = datetime.date.today()
         logger.debug(f"--> Matched intent: {intent}")
 
-    # 5. Question Check
+    # 5. General Question Check
     debug_ask_q_starts = text_lower.startswith(QUESTION_WORDS)
     debug_ask_q_mark = "?" in text
     logger.debug(f"Checking ask_question: starts_with_qword={debug_ask_q_starts}, contains_qmark={debug_ask_q_mark}")
