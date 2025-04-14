@@ -130,4 +130,3 @@ def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
 
     logger.info(f"NLU Final Result: Intent={intent}, Entities={entities}")
     return {"intent": intent, "entities": entities}
-
