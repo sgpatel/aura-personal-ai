@@ -2,6 +2,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import datetime
+from datetime import date
 
 class SpendingLogBase(BaseModel):
     description: str
@@ -30,3 +31,10 @@ class SpendingLog(SpendingLogBase):
 class SpendingLogsOutput(BaseModel):
     spending_logs: List[SpendingLog]
     total_amount: Optional[float] = None
+
+class SpendingLogCreate(BaseModel):
+    amount: float
+    currency: str = "USD"
+    description: str
+    category: str = "Other"
+    date: Optional[date]

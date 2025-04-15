@@ -1,5 +1,5 @@
 # backend/api/v1/endpoints/reminders.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List
 import datetime
@@ -46,21 +46,20 @@ async def create_new_reminder(
     return temp_response_data
     # return crud.reminder.get(...) # Fetch the actual saved object if possible
 
-@router.get("/", response_model=RemindersOutput)
-async def read_reminders(
+@router.get("/", response_model=List[Reminder])
+def read_reminders(
+    active_only: bool = Query(True),
+    time_filter: str = Query("week"),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    skip: int = 0,
-    limit: int = 100,
-    active_only: bool = True, # Option to get only active reminders
 ):
-    """
-    Retrieve reminders for the current user.
-    """
-    reminders_db = crud.reminder.get_multi_by_owner(
-        db=db, user_id=current_user.id, skip=skip, limit=limit, only_active=active_only
+    reminders_db = crud.reminder.get_filtered_reminders(
+        db,
+        user_id=current_user.id,
+        time_filter=time_filter,
+        is_active=active_only
     )
-    return RemindersOutput(reminders=reminders_db)
+    return reminders_db
 
 @router.get("/upcoming", response_model=RemindersOutput)
 async def read_upcoming_reminders(

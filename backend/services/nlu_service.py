@@ -1,132 +1,399 @@
 # backend/services/nlu_service.py
-# Placeholder - Replace with real NLU
+# Enhanced Hybrid NLU with Advanced Intent Recognition
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
+import json
 import re
 import datetime
+from datetime import timezone
+from collections import defaultdict
+
+# Enhanced dateutil integration
+try:
+    import dateutil.parser
+    from dateutil.relativedelta import relativedelta
+    DATEUTIL_AVAILABLE = True
+except ImportError:
+    DATEUTIL_AVAILABLE = False
+
+from backend.services.llm import get_llm_service
+from backend.core.config import logger
 
 logger = logging.getLogger("aura_backend.nlu")
 logger.setLevel(logging.DEBUG)
 
-QUESTION_WORDS = ("who", "what", "where", "when", "why", "how", "is", "are", "do", "does", "can", "could", "tell me")
-MEETING_WORDS = ("meeting", "appointment", "schedule", "meet with", "appt")
-# --- New Keywords for Getting Reminders ---
-REMINDER_QUERY_WORDS = (
-    "upcoming meetings", "my reminders", "scheduled meetings",
-    "check reminders", "what reminders", "what meetings",
-    "list reminders", "show reminders", "reminders list"
+# === Intent Taxonomy ===
+VALID_INTENTS = [
+    # Data Logging
+    "save_note", "log_spending", "log_investment", "log_medical",
+    # Scheduling
+    "set_reminder", "schedule_meeting", "modify_event",
+    # Queries
+    "get_summary", "get_note_summary", "get_reminders", "query_spending",
+    # Knowledge
+    "ask_question", "search_information",
+    # System
+    "unknown", "command", "feedback"
+]
+
+# === Entity Ontology ===
+COMMON_ENTITIES = [
+    # Core
+    "content", "amount", "currency", "description",
+    # Temporal
+    "date", "time", "datetime", "timezone", "duration",
+    # Categorization
+    "category", "tags", "keywords", "log_type", "priority",
+    # Querying
+    "filter", "time_range", "limit", "sort_by",
+    # Relationships
+    "person", "location", "organization",
+    # System
+    "confidence", "raw_text", "llm_fallback"
+]
+
+# === Intent Patterns (expanded from previous) ===
+INTENT_PATTERNS = {
+    "log_spending": [
+        re.compile(r'(spent|spend|expensed?|paid)\s+((?:{currencies})?[0-9,.]+\b)(?:\s+?(?:on|for)\s+(.+))', re.I),
+        re.compile(r'(bought|purchased)\s+(.+?)\s+for\s+((?:{currencies})?[0-9,.]+)', re.I)
+    ],
+    "schedule_meeting": [
+        re.compile(r'(meet|meeting|call)\s+(?:with\s+)?(.+?)\s+(?:at|on)\s+(.+?)(?:\s+to\s+discuss\s+(.+))?', re.I),
+        re.compile(r'(schedule|arrange)\s+(?:a\s+)?(appointment|demo)\s+(?:for|on)\s+(.+)', re.I)
+    ],
+    "set_reminder": [
+        re.compile(r'(remind me|set reminder|alert me)\s+(?:to|about)\s+(.+?)\s+(at|on)\s+(.+)', re.I),
+        re.compile(r'(?:⏰|❗)\s*(.+?)\s+-\s+(.+)', re.I)
+    ]
+}
+
+TIME_RELATED = re.compile(
+    r'\b(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?)|'
+    r'(next\s+(week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday))|'
+    r'(in\s+\d+\s+(hours?|days?|weeks?))|'
+    r'(tomorrow|tonight|today|noon|midnight)\b', re.I
 )
-# --- End New Keywords ---
-TIME_PATTERN = re.compile(r'\b(\d{1,2}(:\d{2})?)\s*(am|pm)?\b', re.IGNORECASE)
-SPENDING_PATTERN = re.compile(r'\b(?:spend|spent)\s+([$£€₹]?\s*\d+(?:[.,]\d{1,2})?)\b(?:.*?(?:for|on)\s+(.+))?', re.IGNORECASE)
 
+CURRENCY_SYMBOLS = {'$', '£', '€', '₹', '¥'}
+QUESTION_PATTERN = re.compile(
+    r'^(can you|could you|would you|please|how to|what\'?s?|who\'?s?|where|when|why|how)\b', re.I
+)
 
-def get_nlu_results(text: str, user_context: Dict) -> Dict[str, Any]:
-    """
-    Placeholder NLU - Includes get_reminders intent.
-    Replace with real NLU model/API.
-    """
-    logger.debug(f"NLU Service Processing input: '{text}'")
-    intent = "unknown"
-    entities = {}
+# === Entity Validation Rules ===
+ENTITY_VALIDATION = {
+    "log_spending": {
+        "required": ["amount"],
+        "optional": ["currency", "description", "category"],
+        "types": {
+            "amount": (int, float),
+            "currency": (str),
+            "category": (str)
+        }
+    },
+    "schedule_meeting": {
+        "required": ["datetime"],
+        "optional": ["participants", "location", "agenda"],
+        "types": {
+            "datetime": (str, datetime.datetime),
+            "duration": (int, float)
+        }
+    },
+    "set_reminder": {
+        "required": ["datetime"],
+        "optional": ["content", "priority"],
+        "types": {
+            "datetime": (str, datetime.datetime),
+            "priority": (int)
+        }
+    },
+    "get_reminders": {
+        "optional": ["filter", "time_range"],
+        "types": {
+            "filter": (str),
+            "time_range": (str)
+        }
+    },
+    "log_investment": {
+        "required": ["amount", "currency"],
+        "optional": ["description", "category"],
+        "types": {
+            "amount": (int, float),
+            "currency": (str),
+            "category": (str)
+        }
+    },
+    "log_medical": {
+        "required": ["description", "amount"],
+        "optional": ["category"],
+        "types": {
+            "description": (str),
+            "amount": (int, float),
+            "category": (str)
+        }
+    },
+    "ask_question": {
+        "required": ["question"],
+        "optional": ["context"],
+        "types": {
+            "question": (str),
+            "context": (str)
+        }
+    },
+    "search_information": {
+        "required": ["query"],
+        "optional": ["filters"],
+        "types": {
+            "query": (str),
+            "filters": (dict)
+        }
+    },
+    "get_summary": {
+        "required": ["content"],
+        "optional": ["context"],
+        "types": {
+            "content": (str),
+            "context": (str)
+        }
+    },
+    "get_note_summary": {
+        "required": ["note_id"],
+        "optional": ["context"],
+        "types": {
+            "note_id": (str),
+            "context": (str)
+        }
+    },
+    "query_spending": {
+        "required": ["time_range"],
+        "optional": ["category", "limit"],
+        "types": {
+            "time_range": (str),
+            "category": (str),
+            "limit": (int)
+        }
+    },
+    "feedback": {
+        "required": ["feedback"],
+        "optional": ["context"],
+        "types": {
+            "feedback": (str),
+            "context": (str)
+        }
+    },
+    "command": {
+        "required": ["command"],
+        "optional": ["parameters"],
+        "types": {
+            "command": (str),
+            "parameters": (dict)
+        }
+    },
+    "unknown": {
+        "required": [],
+        "optional": ["raw_text"],
+        "types": {
+            "raw_text": (str)
+        }
+    }
+}
+
+# === Enhanced LLM Prompt Engineering ===
+LLM_EXAMPLES = """
+Examples:
+1. Input: "Remind me to call John at 3pm tomorrow"
+   Output: {"intent": "set_reminder", "entities": {"content": "call John", "datetime": "2024-03-21T15:00:00Z"}}
+
+2. Input: "I spent $45.50 on office supplies"
+   Output: {"intent": "log_spending", "entities": {"amount": 45.50, "description": "office supplies"}}
+
+3. Input: "What's my schedule for next week?"
+   Output: {"intent": "get_reminders", "entities": {"filter": "next week"}}
+"""
+
+def build_llm_nlu_prompt(text: str) -> str:
+    """ Constructs an enhanced prompt with examples and formatting guidance. """
+    return f"""Perform detailed intent classification and entity extraction. Follow these steps:
+
+1. Analyze the user's input for key actions and context
+2. Identify the most specific intent from: {", ".join(VALID_INTENTS)}
+3. Extract relevant entities using schema: {", ".join(COMMON_ENTITIES)}
+4. Format response as JSON with "intent" and "entities" keys
+
+{LLM_EXAMPLES}
+
+Current Input: "{text}"
+JSON Response:"""
+
+# === Advanced Time Parsing ===
+def parse_time_expression(text: str) -> Dict[str, Any]:
+
+    """Handle null/empty input"""
+    parsed = {"date": None, "time": None, "datetime": None}
+    if not text:
+        return parsed
+    
+    """Enhanced time parsing with relative expressions and fallbacks"""
+    now = datetime.datetime.now(timezone.utc)
+    parsed = {"date": None, "time": None, "datetime": None}
+    
+    if DATEUTIL_AVAILABLE:
+        try:
+            dt = dateutil.parser.parse(text, fuzzy=True, default=now)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            parsed.update({
+                "date": dt.date().isoformat(),
+                "time": dt.time().isoformat(),
+                "datetime": dt.isoformat()
+            })
+            return parsed
+        except:
+            pass
+
+    # Fallback relative time parsing
+    relative_match = re.search(r'in\s+(\d+)\s+(hour|day|week)s?', text, re.I)
+    if relative_match:
+        num, unit = relative_match.groups()
+        delta = relativedelta(**{f"{unit}s": int(num)})
+        future = now + delta
+        parsed["datetime"] = future.isoformat()
+    
+    return parsed
+
+# === Enhanced Rule-Based Processing ===
+def rule_based_processing(text: str) -> Dict[str, Any]:
+    """Add null check for text input"""
+    result = {"intent": "unknown", "entities": {}}
+    if not text:
+        return result
+    
+    text = text.strip()
+
+    """Advanced pattern matching with context awareness"""
+    result = {"intent": "unknown", "entities": {}}
     text_lower = text.lower()
+    
+    # Check all intent patterns
+    for intent, patterns in INTENT_PATTERNS.items():
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                result["intent"] = intent
+                result["entities"] = extract_entities(intent, match.groups())
+                if validate_entities(intent, result["entities"]):
+                    return result
+                else:
+                    result["intent"] = "unknown"  # Reset if invalid
+    
+    # Specialized checks
+    if any(q_word in text_lower for q_word in ("schedule", "plan", "arrange")) and TIME_RELATED.search(text):
+        result["intent"] = "schedule_meeting"
+        result["entities"] = parse_time_expression(text)
+    
+    return result
 
-    # --- Intent Checks (Order matters: More specific first) ---
+def extract_entities(intent: str, match_groups: tuple) -> Dict:
 
-    # 1. Specific Commands/Logs
-    spending_match = SPENDING_PATTERN.search(text)
-    logger.debug(f"Checking log_spending (pattern): match={bool(spending_match)}")
-    if spending_match:
-        intent = "log_spending"; entities['amount'] = None; entities['description'] = "Unspecified Expense"
-        try: amount_str = re.sub(r'[^\d.,]', '', spending_match.group(1)).replace(',', '.'); entities['amount'] = float(amount_str)
-        except (ValueError, TypeError): logger.warning(f"Could not parse amount: {spending_match.group(1)}")
-        if spending_match.group(2): entities['description'] = spending_match.group(2).strip()
-        logger.debug(f"--> Matched intent: {intent}")
-    elif intent == "unknown" and ("log spending" in text_lower or "expense" in text_lower):
-         intent = "log_spending"; match_amount = re.search(r'\$?(\d+(\.\d{1,2})?)', text)
-         if match_amount: entities['amount'] = float(match_amount.group(1))
-         match_desc = re.search(r'(?:for|of) (.*)', text, re.IGNORECASE)
-         if match_desc: entities['description'] = match_desc.group(1).strip()
-         else: entities['description'] = "Unspecified Expense"
-         logger.debug(f"--> Matched intent (keyword fallback): {intent}")
+    """Add null safety checks"""
+    entities = {}
+    if not match_groups:
+        return entities
+    try:
+        """Entity extraction based on intent patterns"""
+        if intent == "log_spending":
+            entities["amount"] = float(match_groups[0].replace(',', '.'))
+            entities["description"] = match_groups[1] if len(match_groups) > 1 else "Miscellaneous"
+        elif intent == "schedule_meeting" and len(match_groups) >= 4:
+                # Add index checks
+                time_text = match_groups[-1] if match_groups else ""
+                entities.update(parse_time_expression(time_text))
+                entities["subject"] = match_groups[1] if len(match_groups) > 1 else "Meeting"
+    except IndexError:
+        logger.warning("Match groups index error during entity extraction")
+    return entities
 
-    logger.debug(f"Checking log_investment: 'log investment' in text={ 'log investment' in text_lower }")
-    if intent == "unknown" and "log investment" in text_lower:
-        intent = "log_investment"; entities['content'] = text.replace("log investment", "").strip(); logger.debug(f"--> Matched intent: {intent}")
+def validate_entities(intent: str, entities: Dict) -> bool:
+    """Validate entities against intent requirements"""
+    validation_rules = ENTITY_VALIDATION.get(intent, {})
+    for field in validation_rules.get("required", []):
+        if field not in entities:
+            return False
+    for field, types in validation_rules.get("types", {}).items():
+        if not isinstance(entities.get(field), types):
+            return False
+    return True
 
-    debug_log_medical_keywords = "log medical" in text_lower or "log symptom" in text_lower or "log medication" in text_lower
-    logger.debug(f"Checking log_medical: has_keywords={debug_log_medical_keywords}")
-    if intent == "unknown" and debug_log_medical_keywords:
-        intent = "log_medical"; entities['content'] = text.split(":", 1)[-1].strip()
-        if "symptom" in text_lower: entities['log_type'] = "symptom"
-        elif "medication" in text_lower: entities['log_type'] = "medication"
-        else: entities['log_type'] = "general"
-        logger.debug(f"--> Matched intent: {intent}")
+# === Enhanced Hybrid Processing ===
+async def get_nlu_results_hybrid(text: str, user_context: Dict = None) -> Dict[str, Any]:
+    """Advanced hybrid processing with validation and context awareness"""
+    logger.debug(f"Processing: '{text}'")
+    
+    # 1. Enhanced Rule-Based Analysis
+    rule_result = rule_based_processing(text)
+    if rule_result["intent"] != "unknown":
+        logger.info(f"Rule-based match: {rule_result}")
+        return rule_result
+    
+    # 2. Context-Aware LLM Fallback
+    llm_result = await get_intent_and_entities_from_llm(text)
+    if llm_result["intent"] != "unknown":
+        if validate_entities(llm_result["intent"], llm_result["entities"]):
+            logger.info(f"LLM valid result: {llm_result}")
+            return llm_result
+    
+    # 3. Final Fallback with Semantic Analysis
+    return {
+        "intent": "save_note" if len(text) > 15 else "unknown",
+        "entities": {"content": text}
+    }
 
-    # 2. Actions (Scheduling/Reminders)
-    debug_has_meet_word = any(word in text_lower for word in MEETING_WORDS)
-    debug_time_match = TIME_PATTERN.search(text); debug_has_time = bool(debug_time_match)
-    logger.debug(f"Checking schedule_meeting: has_meet_word={debug_has_meet_word}, has_time={debug_has_time}")
-    if intent == "unknown" and debug_has_meet_word and debug_has_time:
-        intent = "schedule_meeting"; entities['raw_meeting_text'] = text; entities['time_mention'] = debug_time_match.group(0) if debug_time_match else None
-        entities['extracted_datetime'] = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2); entities['extracted_content'] = f"Meeting: {text}"
-        logger.debug(f"--> Matched intent: {intent}")
+# === Enhanced LLM Response Processing ===
+async def get_intent_and_entities_from_llm(text: str) -> Dict[str, Any]:
+    """Improved LLM response handling with validation"""
+    result = {"intent": "unknown", "entities": {}}
+    try:
+        llm_service = get_llm_service()
+        prompt = build_llm_nlu_prompt(text)
+        response = await llm_service.generate_text(prompt=prompt, max_tokens=300, temperature=0.1)
+        
+        # Robust JSON extraction
+        json_str = extract_json(response)
+        if json_str:
+            parsed = json.loads(json_str)
+            if validate_llm_response(parsed):
+                result["intent"] = parsed["intent"]
+                result["entities"] = filter_entities(parsed.get("entities", {}))
+    
+    except Exception as e:
+        logger.error(f"LLM processing error: {e}")
+    
+    return result
 
-    logger.debug(f"Checking set_reminder: 'remind me' in text={ 'remind me' in text_lower }")
-    if intent == "unknown" and "remind me" in text_lower:
-        intent = "set_reminder"; entities['raw_reminder_text'] = text; entities['remind_at'] = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
-        logger.debug(f"--> Matched intent: {intent}")
+def extract_json(text: str) -> str:
+    """Robust JSON extraction using multiple methods"""
+    # Method 1: Look for JSON blocks
+    json_match = re.search(r'```json\n({.*?})\n```', text, re.DOTALL)
+    if json_match:
+        return json_match.group(1)
+    
+    # Method 2: Find first valid JSON
+    for match in re.finditer(r'{.*}', text):
+        try:
+            json.loads(match.group())
+            return match.group()
+        except:
+            continue
+    return ""
 
-    # 3. Specific Note Saving Command
-    logger.debug(f"Checking save_note (keywords): 'note:' in text={ 'note:' in text_lower }, 'save note' in text={ 'save note' in text_lower }")
-    if intent == "unknown" and ("note:" in text_lower or "save note" in text_lower):
-        intent = "save_note"; entities['content'] = text.split(":", 1)[-1].strip() if ":" in text else text.replace("save note", "").strip(); entities['is_global'] = True
-        logger.debug(f"--> Matched intent: {intent}")
+def filter_entities(entities: Dict) -> Dict:
+    """Filter entities to only include valid fields"""
+    return {k: v for k, v in entities.items() if k in COMMON_ENTITIES}
 
-    # 4. Querying Information (BEFORE general question check)
-    debug_get_reminders = any(phrase in text_lower for phrase in REMINDER_QUERY_WORDS)
-    logger.debug(f"Checking get_reminders: has_keywords={debug_get_reminders}")
-    if intent == "unknown" and debug_get_reminders:
-        intent = "get_reminders"
-        entities['filter'] = 'upcoming' # Default filter, could parse "today", "next week" etc.
-        logger.debug(f"--> Matched intent: {intent}")
-
-    debug_note_summary_keywords = "summarize notes tagged" in text_lower or "summarize notes about" in text_lower
-    logger.debug(f"Checking get_note_summary: has_keywords={debug_note_summary_keywords}")
-    if intent == "unknown" and debug_note_summary_keywords:
-        intent = "get_note_summary"
-        if "tagged" in text_lower: entities['tags'] = [tag.strip() for tag in text_lower.split("tagged")[-1].split(',')]
-        if "about" in text_lower: entities['keywords'] = [kw.strip() for kw in text_lower.split("about")[-1].split(',')]
-        logger.debug(f"--> Matched intent: {intent}")
-
-    logger.debug(f"Checking get_summary (keyword 'summarize'): 'summarize' in text={ 'summarize' in text_lower }")
-    if intent == "unknown" and "summarize" in text_lower: # General summarize check
-        intent = "get_summary"; entities['period'] = 'day'; entities['date'] = datetime.date.today()
-        if " on " in text_lower:
-            try: date_str = text_lower.split(" on ")[-1].strip().replace("?",""); parsed_date = datetime.datetime.strptime(date_str, "%B %d %Y").date(); entities['date'] = parsed_date
-            except ValueError: pass
-        logger.debug(f"--> Matched intent: {intent}")
-
-    debug_get_summary_what = "what did i do on" in text_lower or "what happened on" in text_lower
-    logger.debug(f"Checking get_summary (keywords 'what did/happened'): has_keywords={debug_get_summary_what}")
-    if intent == "unknown" and debug_get_summary_what:
-        intent = "get_summary"; entities['period'] = 'day'
-        try: date_str = text_lower.split(" on ")[-1].strip().replace("?",""); parsed_date = datetime.datetime.strptime(date_str, "%B %d %Y").date(); entities['date'] = parsed_date
-        except ValueError: logger.warning(f"Could not parse date: {text}"); entities['date'] = datetime.date.today()
-        logger.debug(f"--> Matched intent: {intent}")
-
-    # 5. General Question Check
-    debug_ask_q_starts = text_lower.startswith(QUESTION_WORDS)
-    debug_ask_q_mark = "?" in text
-    logger.debug(f"Checking ask_question: starts_with_qword={debug_ask_q_starts}, contains_qmark={debug_ask_q_mark}")
-    if intent == "unknown" and (debug_ask_q_starts or debug_ask_q_mark):
-        intent = "ask_question"; entities['question_text'] = text
-        logger.debug(f"--> Matched intent: {intent}")
-
-    # --- Fallback to Save Note ---
-    if intent == "unknown":
-        intent = "save_note"; entities['content'] = text; entities['is_global'] = True
-        logger.debug(f"--> No specific intent matched, falling back to: {intent}")
-
-    logger.info(f"NLU Final Result: Intent={intent}, Entities={entities}")
-    return {"intent": intent, "entities": entities}
+def validate_llm_response(response: Dict) -> bool:
+    """Comprehensive response validation"""
+    return (
+        response.get("intent") in VALID_INTENTS and
+        isinstance(response.get("entities", {}), dict) and
+        all(k in COMMON_ENTITIES for k in response.get("entities", {}).keys())
+    )
