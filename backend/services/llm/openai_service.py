@@ -38,7 +38,7 @@ class OpenAILLMService(LLMService):
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
-                temperature=0.7,
+                #temperature=0.7,
                 **kwargs
             )
             if response.choices and response.choices[0].message:
@@ -67,7 +67,7 @@ class OpenAILLMService(LLMService):
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
-                temperature=0.5,
+               # temperature=0.5,
                 **kwargs
             )
             if response.choices and response.choices[0].message:

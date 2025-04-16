@@ -25,20 +25,25 @@ async def create_new_medical_log(
     logger.info(f"Medical log {log_db.id} created for user {current_user.id}")
     return log_db
 
+# --- Updated GET / to pass filters to CRUD ---
 @router.get("/", response_model=MedicalLogsOutput)
 async def read_medical_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
     skip: int = 0,
     limit: int = 100,
-    log_type: Optional[str] = Query(None, description="Filter by log type (e.g., symptom, medication)"),
+    log_type: Optional[str] = Query(None, description="Filter by log type (case-insensitive, partial match)"),
     start_date: Optional[datetime.date] = Query(None, description="Filter logs from this date"),
     end_date: Optional[datetime.date] = Query(None, description="Filter logs up to this date"),
 ):
     """ Retrieve medical logs for the current user, with optional filters. """
-    # TODO: Implement filtering logic in CRUD function get_multi_by_owner
-    logs_db = crud.medical_log.get_multi_by_owner(db=db, user_id=current_user.id, log_type=log_type, skip=skip, limit=limit)
+    logs_db = crud.medical_log.get_multi_by_owner(
+        db=db, user_id=current_user.id,
+        log_type=log_type, start_date=start_date, end_date=end_date, # Pass filters
+        skip=skip, limit=limit
+    )
     return MedicalLogsOutput(medical_logs=logs_db)
+# --- End Update ---
 
 @router.get("/{log_id}", response_model=MedicalLog)
 async def read_medical_log_by_id(

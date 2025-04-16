@@ -1,7 +1,8 @@
 # backend/api/v1/endpoints/investments.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+import datetime
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List,Optional
 
 from backend.db.session import get_db
 from backend.schemas.investment_note import InvestmentNote, InvestmentNoteCreate, InvestmentNoteUpdate, InvestmentNotesOutput
@@ -24,16 +25,27 @@ async def create_new_investment_note(
     logger.info(f"Investment note {note_db.id} created for user {current_user.id}")
     return note_db
 
+# --- Updated GET / to accept date filters ---
 @router.get("/", response_model=InvestmentNotesOutput)
 async def read_investment_notes(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
+    start_date: Optional[datetime.date] = Query(None, description="Filter notes created from this date"),
+    end_date: Optional[datetime.date] = Query(None, description="Filter notes created up to this date"),
     skip: int = 0,
     limit: int = 100,
 ):
-    """ Retrieve investment notes for the current user. """
-    notes_db = crud.investment_note.get_multi_by_owner(db=db, user_id=current_user.id, skip=skip, limit=limit)
+    """Retrieve investment notes for the current user, optionally filtered by creation date."""
+    notes_db = crud.investment_note.get_multi_by_owner(
+        db=db,
+        user_id=current_user.id,
+        start_date=start_date,
+        end_date=end_date,  # Pass filters to CRUD
+        skip=skip,
+        limit=limit,
+    )
     return InvestmentNotesOutput(investment_notes=notes_db)
+# --- End Update ---
 
 @router.get("/{note_id}", response_model=InvestmentNote)
 async def read_investment_note_by_id(
