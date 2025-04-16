@@ -16,11 +16,28 @@ router = APIRouter()
 
 @router.post("/", response_model=Note, status_code=status.HTTP_201_CREATED)
 async def create_new_note(note_in: NoteCreate, db: Session = Depends(get_db), current_user: User = Depends(deps.get_current_active_user)):
-    note_db = crud.note.create_with_owner(db=db, obj_in=note_in, user_id=current_user.id); logger.info(f"Note {note_db.id} created for user {current_user.id}"); return note_db
+    note_db = crud.note.create_with_owner(db=db, obj_in=note_in, user_id=current_user.id); 
+    logger.info(f"Note {note_db.id} created for user {current_user.id}"); return note_db
 
 @router.get("/global", response_model=NotesOutput)
-async def read_global_notes(db: Session = Depends(get_db), current_user: User = Depends(deps.get_current_active_user), skip: int = 0, limit: int = 100):
-    notes_db = crud.note.get_global(db=db, user_id=current_user.id); return NotesOutput(notes=notes_db)
+async def read_global_notes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+    start_date: Optional[datetime.date] = Query(None, description="Filter notes created from this date"),
+    end_date: Optional[datetime.date] = Query(None, description="Filter notes created up to this date"),
+    skip: int = 0,
+    limit: int = 100,
+):
+    """Retrieve global notes for the current user, optionally filtered by creation date."""
+    notes_db = crud.note.get_global(
+        db=db,
+        user_id=current_user.id,
+        start_date=start_date,
+        end_date=end_date,  # Pass filters to CRUD
+        skip=skip,
+        limit=limit,
+    )
+    return NotesOutput(notes=notes_db)
 
 # --- Path Changed back to /important/{date_str} ---
 @router.get("/important/{date_str}", response_model=NotesOutput)

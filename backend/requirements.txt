@@ -23,3 +23,4 @@ pgvector # Added pgvector client
 sentence-transformers # Added for generating embeddings
 
 # Add task queue libraries (e.g., celery, redis) when implementing reminders
+python-dateutil

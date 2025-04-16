@@ -25,18 +25,34 @@ class CRUDMedicalLog(CRUDBase[MedicalLogDB, MedicalLogCreate, MedicalLogUpdate])
         return db_obj
 
     def get_multi_by_owner(
-        self, db: Session, *, user_id: int, log_type: Optional[str] = None, skip: int = 0, limit: int = 100
+        self,
+        db: Session,
+        *,
+        user_id: int,
+        log_type: Optional[str] = None,
+        start_date: Optional[datetime.date] = None,  # Added date filters
+        end_date: Optional[datetime.date] = None,    # Added date filters
+        skip: int = 0,
+        limit: int = 100
     ) -> List[MedicalLogDB]:
-        """Gets multiple medical logs for a specific user, optionally filtered by type."""
+        """Gets multiple medical logs for a user, optionally filtered by type and date range."""
         query = db.query(self.model).filter(MedicalLogDB.user_id == user_id)
         if log_type:
-            query = query.filter(MedicalLogDB.log_type == log_type)
-        return query.order_by(MedicalLogDB.date.desc(), MedicalLogDB.timestamp.desc()).offset(skip).limit(limit).all()
-
-    def get_by_date(
-        self, db: Session, *, user_id: int, date: datetime.date
-    ) -> List[MedicalLogDB]:
-        """Gets medical logs for a specific user and date."""
+            query = query.filter(MedicalLogDB.log_type.ilike(f"%{log_type}%"))  # Allow partial match for type
+        # Apply date filters
+        if start_date:
+            query = query.filter(MedicalLogDB.date >= start_date)
+        if end_date:
+            query = query.filter(MedicalLogDB.date <= end_date)
+        return (
+            query.order_by(MedicalLogDB.date.desc(), MedicalLogDB.timestamp.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        
+    def get_by_date(self, db: Session, *, user_id: int, date: datetime.date) -> List[MedicalLogDB]:
+        # This can still be useful for fetching a single day's logs
         return (
             db.query(self.model)
             .filter(MedicalLogDB.user_id == user_id, MedicalLogDB.date == date)
