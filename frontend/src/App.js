@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Mic, Settings, User, Bot, Clock, History, Loader2,
   NotebookText, Wallet, TrendingUp, HeartPulse, ChevronDown,
-  Menu, Sun, Moon, LogIn, LogOut, UserPlus, RefreshCw, X // Added X
+  Menu, Sun, Moon, LogIn, LogOut, UserPlus, RefreshCw, X, Filter // Added Filter
 } from 'lucide-react';
 
 // --- API Client Helper ---
@@ -327,6 +327,11 @@ function App() {
   const [isLoadingUser, setIsLoadingUser] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
+    // --- New State for Spending Date Filters ---
+    const todayStr = new Date().toISOString().split('T')[0];
+    const [spendingStartDate, setSpendingStartDate] = useState(todayStr);
+    const [spendingEndDate, setSpendingEndDate] = useState(todayStr);
+    // --- End New State ---
 
   const logEndRef = useRef(null);
   const BACKEND_URL = 'http://localhost:8000/api/v1';
@@ -338,19 +343,38 @@ function App() {
 
   // --- Login/Logout/Register Handlers ---
   const handleLoginSuccess = (newToken) => { localStorage.setItem('aura_token', newToken); setToken(newToken); setIsAuthenticated(true); setAuthError(''); console.log("Login Success."); };
+  
   const handleLogout = useCallback(() => {
-      localStorage.removeItem('aura_token'); setToken(null); setIsAuthenticated(false); setLog([]);
-      // Reset all fetched data states
-      setGlobalNotes([]); setGlobalNotesError('');
-      setReminders([]); setRemindersError('');
-      setSpendingLogs([]); setSpendingError(''); setSpendingTotal(null);
-      setInvestmentNotes([]); setInvestmentNotesError(''); // Reset investments
-      setMedicalLogs([]); setMedicalLogsError(''); // Reset medical
-      setCurrentUser(null); // Clear current user data
-      setIsLoadingUser(false); // Reset loading state
-      console.log("User logged out");
-  }, []); // Added investment/medical reset
-  const handleRegisterSuccess = () => { console.log("Registration successful! Please login."); setAuthError(''); setAuthMode('login'); };
+    localStorage.removeItem('aura_token');
+    setToken(null);
+    setIsAuthenticated(false);
+    setLog([]);
+    setGlobalNotes([]);
+    setGlobalNotesError('');
+    setReminders([]);
+    setRemindersError('');
+    setSpendingLogs([]);
+    setSpendingError('');
+    setSpendingTotal(null);
+    setInvestmentNotes([]);
+    setInvestmentNotesError('');
+    setMedicalLogs([]);
+    setMedicalLogsError('');
+    setCurrentUser(null);
+    setIsLoadingUser(false);
+    // Reset date filters on logout
+    const today = new Date().toISOString().split('T')[0];
+    setSpendingStartDate(today);
+    setSpendingEndDate(today);
+    // Reset other date filters here...
+    console.log("User logged out");
+  }, []);
+
+  const handleRegisterSuccess = () => { 
+    console.log("Registration successful! Please login."); 
+    setAuthError(''); 
+    setAuthMode('login'); 
+};
 
   // --- handleSend Function (Chat Processing) ---
  // --- Function to handle sending text data to the backend (Updated) ---
@@ -425,7 +449,7 @@ const handleFetchImportantNotes = async () => {
     setLog(prevLog => [...prevLog, { type: 'aura', text: `Fetching notes for ${selectedDate}...` }]);
      try {
         const data = await apiClient.get(`${BACKEND_URL}/notes/important/${selectedDate}`);
-        const notesText = data.notes && data.notes.length > 0 ? data.notes.map(note => `- ${note.content.substring(0, 50)}...`).join('\n') : `No important notes found for ${selectedDate}.`;
+        const notesText = data.notes && data.notes.length > 0 ? data.notes.map(note => `- ${note.content}`).join('\n') : `No important notes found for ${selectedDate}.`;
         setLog(prevLog => [...prevLog, { type: 'aura', text: `Notes for ${selectedDate}:\n${notesText}` }]);
     } catch (error) {
         console.error("Error fetching notes:", error);
@@ -472,45 +496,74 @@ const handleFetchImportantNotes = async () => {
     }
   }, [isAuthenticated, handleLogout]);
 
-   const fetchReminders = useCallback(async (activeOnly = true) => {
+    // --- Fetch Reminders Implementation (Updated Signature & URL) ---
+  const fetchReminders = useCallback(async (activeOnly = true, timeFilter = 'week') => { // Default timeFilter='week'
     if (!isAuthenticated) return;
-    console.log("Fetching reminders...");
+    console.log(`Fetching reminders (activeOnly=${activeOnly}, timeFilter=${timeFilter})...`); // Log params
     setIsLoadingReminders(true);
     setRemindersError('');
     try {
-        // Fetch active reminders by default, adjust query param if needed
-        const data = await apiClient.get(`${BACKEND_URL}/reminders/?active_only=${activeOnly}`);
-        setReminders(data.reminders || []); // Assuming response is { reminders: [...] }
+        // Construct URL with query parameters
+        const params = new URLSearchParams({
+            active_only: String(activeOnly), // Ensure boolean is string
+            time_filter: timeFilter
+        });
+        const url = `${BACKEND_URL}/reminders/?${params.toString()}`;
+        console.log(`Calling: ${url}`); // Log the URL being called
+        const data = await apiClient.get(url);
+        setReminders(data || []); // Use data directly if backend returns List[Reminder]
     } catch (error) {
         console.error("Error fetching reminders:", error);
         setRemindersError(`Failed: ${error.message}`);
-        if (error.message.includes('401')) handleLogout();
+        setReminders([]); // Clear reminders on error
+        if (error.message.includes('API Error 401')) handleLogout();
     } finally {
         setIsLoadingReminders(false);
     }
-  }, [isAuthenticated, handleLogout]); // Dependencies
+  }, [isAuthenticated, handleLogout]); // Dependencies remain the same
   
-  const fetchSpendingLogs = useCallback(async (date = null) => { // Allow filtering by date
-    if (!isAuthenticated) return;
-    const filterDate = date || new Date().toISOString().split('T')[0]; // Default to today if no date passed
-    console.log(`Fetching spending logs for date: ${filterDate}`);
-    setIsLoadingSpending(true);
-    setSpendingError('');
-    try {
-        // Construct URL with query parameters for filtering (example for today)
-        // TODO: Add date range filters later if needed
-        const url = `${BACKEND_URL}/spending/?start_date=${filterDate}&end_date=${filterDate}`;
+  const fetchSpendingLogs = useCallback(
+    async (start = spendingStartDate, end = spendingEndDate) => {
+      if (!isAuthenticated) return;
+      // Ensure dates are valid before fetching
+      if (!start || !end || start > end) {
+        setSpendingError("Invalid date range selected.");
+        return;
+      }
+      console.log(`Fetching spending logs from ${start} to ${end}`);
+      setIsLoadingSpending(true);
+      setSpendingError('');
+      try {
+        // Construct URL with query parameters for filtering
+        const params = new URLSearchParams({
+          start_date: start,
+          end_date: end,
+          limit: "100" // Example limit
+        });
+        const url = `${BACKEND_URL}/spending/?${params.toString()}`;
         const data = await apiClient.get(url);
         setSpendingLogs(data.spending_logs || []);
-        setSpendingTotal(data.total_amount); // Backend needs to calculate and return this
-    } catch (error) {
+        // Backend currently doesn't return total_amount based on filter, so clear it
+        // TODO: Update backend GET /spending to calculate total based on filters
+        setSpendingTotal(null); // Or calculate total on frontend: sum(data.spending_logs.map(l => l.amount))
+        if (data.spending_logs && data.spending_logs.length > 0) {
+          setSpendingTotal(data.spending_logs.reduce((sum, log) => sum + log.amount, 0));
+        } else {
+          setSpendingTotal(0);
+        }
+      } catch (error) {
         console.error("Error fetching spending logs:", error);
         setSpendingError(`Failed: ${error.message}`);
-        if (error.message.includes('401')) handleLogout();
-    } finally {
+        setSpendingLogs([]); // Clear logs on error
+        setSpendingTotal(null);
+        if (error.message.includes('API Error 401')) handleLogout();
+      } finally {
         setIsLoadingSpending(false);
-    }
-  }, [isAuthenticated, handleLogout]); // Dependencies
+      }
+    },
+    [isAuthenticated, handleLogout, spendingStartDate, spendingEndDate]
+  );
+
   
   // --- Fetch Investment Notes Implementation ---
   const fetchInvestmentNotes = useCallback(async () => {
@@ -555,17 +608,24 @@ const handleFetchImportantNotes = async () => {
 
 
   // Fetch initial data on mount after authentication
-  useEffect(() => {
+ useEffect(() => {
     if (isAuthenticated) {
-        fetchGlobalNotes();
-        fetchReminders();
-        fetchSpendingLogs();
-        fetchInvestmentNotes(); // Fetch investments
-        fetchMedicalLogs(); // Fetch medical logs
+      fetchCurrentUser();
+      fetchGlobalNotes();
+      fetchReminders();
+      fetchSpendingLogs(); // Fetches for default date range (today)
+      fetchInvestmentNotes();
+      fetchMedicalLogs();
     }
-    // Clear data on logout (handled in handleLogout)
-  }, [isAuthenticated, fetchGlobalNotes, fetchReminders, fetchSpendingLogs, fetchInvestmentNotes, fetchMedicalLogs]); // Add new fetch functions
-
+  }, [
+    isAuthenticated,
+    fetchCurrentUser,
+    fetchGlobalNotes,
+    fetchReminders,
+    fetchSpendingLogs,
+    fetchInvestmentNotes,
+    fetchMedicalLogs
+  ]);
   // --- Theme Toggle ---
   const toggleTheme = () => { setIsDarkMode(!isDarkMode); };
 
@@ -601,27 +661,125 @@ const handleFetchImportantNotes = async () => {
                 <div className="flex justify-between items-center mb-1"> <p className="text-xs italic">General notes.</p> <button onClick={fetchGlobalNotes} disabled={isLoadingGlobalNotes} title="Refresh Notes" className="p-1 text-gray-400 hover:text-white disabled:opacity-50"> {isLoadingGlobalNotes ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14} />} </button> </div>
                 {isLoadingGlobalNotes && <p className="text-xs text-center">Loading notes...</p>}
                 {globalNotesError && <p className="text-xs text-red-400">{globalNotesError}</p>}
-                {!isLoadingGlobalNotes && !globalNotesError && ( globalNotes.length > 0 ? ( <ul className="list-disc pl-4 mt-1 text-xs space-y-1 max-h-40 overflow-y-auto"> {globalNotes.map(note => ( <li key={note.id} title={note.content}> {note.content.substring(0, 40)}{note.content.length > 40 ? '...' : ''} </li> ))} </ul> ) : ( <p className="text-xs text-gray-400 italic">No global notes found.</p> ) )}
+                {!isLoadingGlobalNotes && !globalNotesError && ( globalNotes.length > 0 ? ( <ul className="list-disc pl-4 mt-1 text-xs space-y-1 max-h-40 overflow-y-auto"> {globalNotes.map(note => ( <li key={note.id} title={note.content}> {note.content.substring(0, 70)}{note.content.length > 70 ? '...' : ''} </li> ))} </ul> ) : ( <p className="text-xs text-gray-400 italic">No global notes found.</p> ) )}
             </CollapsibleSection>
 
             {/* Reminders Section - Integrated */}
             <CollapsibleSection title="Reminders" icon={Clock}>
-                 <div className="flex justify-between items-center mb-1"> <p className="text-xs italic">Upcoming active reminders.</p> <button onClick={() => fetchReminders(true)} disabled={isLoadingReminders} title="Refresh Reminders" className="p-1 text-gray-400 hover:text-white disabled:opacity-50"> {isLoadingReminders ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14} />} </button> </div>
+                 <div className="flex justify-between items-center mb-1">
+                    <p className="text-xs italic">Active reminders.</p>
+                    {/* --- Updated Refresh Button onClick --- */}
+                    <button
+                        onClick={() => fetchReminders(true, 'all')} // Fetch ALL active reminders on refresh
+                        disabled={isLoadingReminders}
+                        title="Refresh Reminders"
+                        className="p-1 text-gray-400 hover:text-white disabled:opacity-50"
+                    >
+                        {isLoadingReminders ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14} />}
+                    </button>
+                    {/* --- End Update --- */}
+                 </div>
                  {isLoadingReminders && <p className="text-xs text-center">Loading reminders...</p>}
                  {remindersError && <p className="text-xs text-red-400">{remindersError}</p>}
-                 {!isLoadingReminders && !remindersError && ( reminders.length > 0 ? ( <ul className="list-disc pl-4 mt-1 text-xs space-y-1 max-h-40 overflow-y-auto"> {reminders.map(reminder => ( <li key={reminder.id} title={`${new Date(reminder.remind_at).toLocaleString()} - ${reminder.content}`}> <span className="font-medium">{new Date(reminder.remind_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}:</span>{' '} {reminder.content.substring(0, 30)}{reminder.content.length > 30 ? '...' : ''} </li> ))} </ul> ) : ( <p className="text-xs text-gray-400 italic">No active reminders found.</p> ) )}
+                 {!isLoadingReminders && !remindersError && ( reminders.length > 0 ? (
+                     <ul className="list-disc pl-4 mt-1 text-xs space-y-1 max-h-40 overflow-y-auto">
+                         {reminders.map(reminder => (
+                             <li key={reminder.id} title={`${new Date(reminder.remind_at).toLocaleString()} - ${reminder.content}`}>
+                                 <span className="font-medium">{new Date(reminder.remind_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}:</span>{' '}
+                                 {reminder.content} {/* Display full content */}
+                             </li>
+                         ))}
+                     </ul>
+                    ) : ( <p className="text-xs text-gray-400 italic">No active reminders found for current filter.</p> ) // Updated empty message
+                 )}
+                 {/* TODO: Add UI to select time filter (today, week, month, all, inactive) */}
                  <button className="w-full mt-2 p-1.5 bg-gray-600 rounded hover:bg-gray-500 text-xs transition-colors duration-200">Manage Reminders</button>
             </CollapsibleSection>
 
             {/* Spending Section - Integrated */}
-            <CollapsibleSection title="Daily Spending" icon={Wallet}>
-                 <div className="flex justify-between items-center mb-1"> <p className="text-xs italic">Today's spending.</p> <button onClick={() => fetchSpendingLogs()} disabled={isLoadingSpending} title="Refresh Spending" className="p-1 text-gray-400 hover:text-white disabled:opacity-50"> {isLoadingSpending ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14} />} </button> </div>
-                  <p className="font-medium text-sm mb-1"> Today: {isLoadingSpending ? '...' : spendingTotal !== null ? `$${spendingTotal.toFixed(2)}` : '$--.--'} </p>
-                 {isLoadingSpending && <p className="text-xs text-center">Loading spending...</p>}
-                 {spendingError && <p className="text-xs text-red-400">{spendingError}</p>}
-                 {!isLoadingSpending && !spendingError && ( spendingLogs.length > 0 ? ( <ul className="list-disc pl-4 mt-1 text-xs space-y-1 max-h-40 overflow-y-auto"> {spendingLogs.map(log => ( <li key={log.id} title={`${log.description} - $${log.amount.toFixed(2)}`}> {log.description.substring(0, 25)}{log.description.length > 25 ? '...' : ''}: <span className="font-medium">${log.amount.toFixed(2)}</span> </li> ))} </ul> ) : ( <p className="text-xs text-gray-400 italic">No spending logged today.</p> ) )}
-                 <button className="w-full mt-2 p-1.5 bg-gray-600 rounded hover:bg-gray-500 text-xs transition-colors duration-200">View Full Log</button>
-            </CollapsibleSection>
+            <CollapsibleSection title="Spending" icon={Wallet}>
+            <div className="flex justify-between items-center mb-2">
+              <p className="text-xs italic">Filter & view spending.</p>
+              <button
+                onClick={() => fetchSpendingLogs(spendingStartDate, spendingEndDate)}
+                disabled={isLoadingSpending}
+                title="Refresh Spending"
+                className="p-1 text-gray-400 hover:text-white disabled:opacity-50"
+              >
+                {isLoadingSpending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              </button>
+            </div>
+            {/* Date Filter Inputs */}
+            <div className="flex space-x-2 mb-2">
+              <div>
+                <label htmlFor="spendingStartDate" className="block mb-1 font-medium text-xs">
+                  From:
+                </label>
+                <input
+                  type="date"
+                  id="spendingStartDate"
+                  value={spendingStartDate}
+                  onChange={(e) => setSpendingStartDate(e.target.value)}
+                  className="w-full p-1 rounded bg-gray-600 border border-gray-500 text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400 appearance-none"
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+              <div>
+                <label htmlFor="spendingEndDate" className="block mb-1 font-medium text-xs">
+                  To:
+                </label>
+                <input
+                  type="date"
+                  id="spendingEndDate"
+                  value={spendingEndDate}
+                  onChange={(e) => setSpendingEndDate(e.target.value)}
+                  className="w-full p-1 rounded bg-gray-600 border border-gray-500 text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400 appearance-none"
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+            </div>
+            {/* Apply Filter Button */}
+            <button
+              onClick={() => fetchSpendingLogs(spendingStartDate, spendingEndDate)}
+              disabled={isLoadingSpending}
+              className="w-full mb-2 p-1.5 bg-blue-600 rounded hover:bg-blue-700 text-xs transition-colors duration-200 flex items-center justify-center disabled:opacity-50"
+            >
+              <Filter size={12} className="mr-1" /> Apply Filter
+            </button>
+
+            {/* Display Total */}
+            <p className="font-medium text-sm mb-1">
+              Total (
+              {spendingStartDate === spendingEndDate ? 'Today' : 'Range'}):{' '}
+              {isLoadingSpending
+                ? '...'
+                : spendingTotal !== null
+                ? `$${spendingTotal.toFixed(2)}`
+                : '$--.--'}
+              {/* Note: Total is calculated client-side for now */}
+            </p>
+            {isLoadingSpending && <p className="text-xs text-center">Loading spending...</p>}
+            {spendingError && <p className="text-xs text-red-400">{spendingError}</p>}
+            {!isLoadingSpending && !spendingError && (
+              spendingLogs.length > 0 ? (
+                <ul className="list-disc pl-4 mt-1 text-xs space-y-1 max-h-40 overflow-y-auto">
+                  {spendingLogs.map((log) => (
+                    <li key={log.id} title={`${log.description} - ${log.currency}${log.amount.toFixed(2)}`}>
+                      {/* Show Date if different from start/end filter? */}
+                      {log.description.substring(0, 20)}
+                      {log.description.length > 20 ? '...' : ''}: <span className="font-medium">{log.currency}{log.amount.toFixed(2)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No spending logged in selected range.</p>
+              )
+            )}
+            {/* TODO: Add button/form to create new spending log */}
+            <button className="w-full mt-2 p-1.5 bg-gray-600 rounded hover:bg-gray-500 text-xs transition-colors duration-200">
+              Add/View Full Log
+            </button>
+          </CollapsibleSection>
 
             {/* Investment Section - Integrated (Basic Display) */}
             <CollapsibleSection title="Investment Details" icon={TrendingUp}>

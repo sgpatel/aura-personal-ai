@@ -25,6 +25,7 @@ async def create_new_spending_log(
     logger.info(f"Spending log {log_db.id} created for user {current_user.id}")
     return log_db
 
+# --- Updated GET / to pass filters to CRUD ---
 @router.get("/", response_model=SpendingLogsOutput)
 async def read_spending_logs(
     db: Session = Depends(get_db),
@@ -33,17 +34,26 @@ async def read_spending_logs(
     limit: int = 100,
     start_date: Optional[datetime.date] = Query(None, description="Filter logs from this date"),
     end_date: Optional[datetime.date] = Query(None, description="Filter logs up to this date"),
-    category: Optional[str] = Query(None, description="Filter by category"),
+    category: Optional[str] = Query(None, description="Filter by category (case-insensitive, partial match)"),
 ):
-    """ Retrieve spending logs for the current user, with optional date and category filters. """
-    # TODO: Implement filtering logic in CRUD function get_multi_by_owner
-    logs_db = crud.spending_log.get_multi_by_owner(db=db, user_id=current_user.id, skip=skip, limit=limit)
-    # TODO: Calculate total if filters are applied
+    """Retrieve spending logs for the current user, with optional date and category filters."""
+    logs_db = crud.spending_log.get_multi_by_owner(
+        db=db,
+        user_id=current_user.id,
+        start_date=start_date,
+        end_date=end_date,
+        category=category,  # Pass filters to CRUD
+        skip=skip,
+        limit=limit
+    )
+    # TODO: Calculate total based on fetched logs if needed, or add dedicated summary endpoint
     total = None
-    if start_date and end_date and not category: # Example: Calculate total for a date range
-         # total = crud.spending_log.get_total_for_period(...)
-         pass
+    # Example client-side calculation: 
+    if logs_db: total = sum(log.amount for log in logs_db)
     return SpendingLogsOutput(spending_logs=logs_db, total_amount=total)
+# --- End Update ---
+
+
 
 @router.get("/{log_id}", response_model=SpendingLog)
 async def read_spending_log_by_id(
